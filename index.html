@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Snake Game</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            background: radial-gradient(ellipse at center, #16213e 0%, #0a0a2e 100%);
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: white;
+            height: 100vh;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+        }
+        
+        /* Minimal floating UI */
+        #uiPanel {
+            position: absolute;
+            top: 32px;
+            left: 32px;
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            padding: 24px;
+            border-radius: 20px;
+            z-index: 10;
+            min-width: 140px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        #score {
+            font-size: 32px;
+            font-weight: 700;
+            color: #ffffff;
+            letter-spacing: -0.5px;
+            margin-bottom: 8px;
+        }
+        
+        #scoreLabel {
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.6);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        /* Minimal controls hint */
+        #controlsHint {
+            position: absolute;
+            bottom: 32px;
+            right: 32px;
+            background: rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 16px 20px;
+            border-radius: 16px;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+            opacity: 0.8;
+            transition: opacity 0.3s ease;
+        }
+        
+        #controlsHint:hover {
+            opacity: 1;
+        }
+        
+        .key {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            padding: 4px 8px;
+            margin: 0 2px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        /* Modern game over modal */
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(10, 10, 46, 0.95);
+            backdrop-filter: blur(40px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 48px;
+            border-radius: 24px;
+            text-align: center;
+            display: none;
+            z-index: 20;
+            box-shadow: 0 20px 80px rgba(0, 0, 0, 0.6);
+            max-width: 400px;
+            width: 90%;
+        }
+        
+        #gameOver h2 {
+            font-size: 36px;
+            font-weight: 800;
+            color: #ff6b6b;
+            margin-bottom: 16px;
+            letter-spacing: -1px;
+        }
+        
+        #finalScore {
+            font-size: 48px;
+            font-weight: 900;
+            margin: 24px 0;
+            color: #4ecdc4;
+            letter-spacing: -1px;
+        }
+        
+        #gameOver p {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 16px;
+            margin-bottom: 32px;
+            font-weight: 500;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+            letter-spacing: 0.5px;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        /* Subtle animations */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            #uiPanel {
+                top: 20px;
+                left: 20px;
+                padding: 20px;
+            }
+            
+            #controlsHint {
+                bottom: 20px;
+                right: 20px;
+                font-size: 12px;
+                padding: 12px 16px;
+            }
+            
+            #score {
+                font-size: 28px;
+            }
+            
+            #gameOver {
+                padding: 32px;
+                max-width: 320px;
+            }
+            
+            #gameOver h2 {
+                font-size: 28px;
+            }
+            
+            #finalScore {
+                font-size: 36px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <!-- Minimal floating score panel -->
+        <div id="uiPanel">
+            <div id="scoreLabel">Score</div>
+            <div id="score">0</div>
+        </div>
+        
+        <!-- Subtle controls hint -->
+        <div id="controlsHint" class="pulse">
+            <span class="key">←→↑↓</span> Move • <span class="key">Space</span> Boost
+        </div>
+        
+        <!-- Modern game over modal -->
+        <div id="gameOver">
+            <h2>Game Over</h2>
+            <div id="finalScore">0</div>
+            <p>Ready to slither again?</p>
+            <button id="restart">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        // Game constants and variables
+        const CELL_SIZE = 1;
+        const INITIAL_SPEED = 150;
+        const SPEED_INCREMENT = 5;
+        const SPEED_BOOST_FACTOR = 2;
+        
+        let snake = [];
+        let direction = { x: 1, y: 0, z: 0 };
+        let nextDirection = { x: 1, y: 0, z: 0 };
+        let food = null;
+        let score = 0;
+        let gameOver = false;
+        let gameSpeed = INITIAL_SPEED;
+        let gameLoop;
+        let cameraDistance = 10;
+        let cameraHeight = 5;
+        let isSpeedBoost = false;
+        let mouseDown = false;
+        let lastMouseX = 0;
+        let lastMouseY = 0;
+        let cameraAngleX = 0;
+        let cameraAngleY = Math.PI / 4;
+        
+        // Camera rotation variables
+        let targetCameraAngleY = Math.PI / 4;
+        let isCameraAutoRotating = true;
+        let lastDirection = { x: 1, y: 0, z: 0 };
+
+        // Performance optimizations
+        let segmentGeometry, segmentMaterial, foodGeometry, foodMaterial, glowMaterial;
+        let stars;
+
+        // Initialize Three.js
+        const scene = new THREE.Scene();
+        
+        // Simplified background - use fog instead of gradient texture
+        scene.background = new THREE.Color(0x0a0a2e);
+        scene.fog = new THREE.Fog(0x2b4f81, 50, 200);
+        
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
+        
+        const renderer = new THREE.WebGLRenderer({ 
+            antialias: false, // Disable for performance
+            alpha: false,
+            powerPreference: "high-performance"
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = false; // Disable shadows for performance
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio
+        document.getElementById('gameContainer').appendChild(renderer.domElement);
+        
+        // Simplified lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        directionalLight.position.set(10, 20, 15);
+        scene.add(directionalLight);
+        
+        // Create optimized stars
+        function createStars() {
+            const starGeometry = new THREE.BufferGeometry();
+            const starCount = 100; // Reduced from 200
+            const positions = new Float32Array(starCount * 3);
+            
+            for (let i = 0; i < starCount * 3; i += 3) {
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI * 0.5;
+                const radius = 200 + Math.random() * 200; // Reduced range
+                
+                positions[i] = radius * Math.sin(phi) * Math.cos(theta);
+                positions[i + 1] = 50 + radius * Math.cos(phi);
+                positions[i + 2] = radius * Math.sin(phi) * Math.sin(theta);
+            }
+            
+            starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            
+            const starMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 2,
+                transparent: false // Disable transparency
+            });
+            
+            stars = new THREE.Points(starGeometry, starMaterial);
+            scene.add(stars);
+        }
+        
+        createStars();
+        
+        // Simplified grid
+        function createGrid() {
+            const gridSize = 60; // Reduced size
+            const gridHelper = new THREE.GridHelper(gridSize, 12, 0x444444, 0x222222); // Fewer divisions
+            gridHelper.position.y = -0.5;
+            scene.add(gridHelper);
+            
+            // Simpler horizon
+            const horizonGeometry = new THREE.PlaneGeometry(400, 400); // Smaller
+            const horizonMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x2b4f81,
+                side: THREE.DoubleSide
+            });
+            const horizon = new THREE.Mesh(horizonGeometry, horizonMaterial);
+            horizon.rotation.x = Math.PI / 2;
+            horizon.position.y = -1;
+            scene.add(horizon);
+        }
+        
+        createGrid();
+        
+        // Pre-create shared geometries and materials
+        segmentGeometry = new THREE.CylinderGeometry(0.35, 0.35, 0.7, 8); // Reduced segments
+        segmentGeometry.rotateX(Math.PI / 2);
+        segmentMaterial = new THREE.MeshLambertMaterial({ color: 0x4caf50 }); // Lambert instead of Phong
+        
+        foodGeometry = new THREE.SphereGeometry(0.45, 8, 8); // Reduced segments
+        foodMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0xff5252,
+            emissive: 0x441111 // Reduced emissive
+        });
+        
+        glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff2222,
+            transparent: true,
+            opacity: 0.2 // Reduced opacity
+        });
+        
+        // Optimized Snake segment class
+        class SnakeSegment {
+            constructor(x, y, z) {
+                this.x = x;
+                this.y = y;
+                this.z = z;
+                
+                this.mesh = new THREE.Mesh(segmentGeometry, segmentMaterial);
+                this.mesh.position.set(x, y, z);
+                scene.add(this.mesh);
+            }
+            
+            updatePosition(x, y, z) {
+                this.x = x;
+                this.y = y;
+                this.z = z;
+                this.mesh.position.set(x, y, z);
+            }
+            
+            remove() {
+                scene.remove(this.mesh);
+                this.mesh.geometry.dispose(); // Not needed since shared, but good practice
+                this.mesh = null;
+            }
+        }
+        
+        // Optimized Food class
+        class Food {
+            constructor() {
+                let x, y, z;
+                do {
+                    x = Math.floor(Math.random() * 26 - 13); // Smaller range
+                    y = 0;
+                    z = Math.floor(Math.random() * 26 - 13);
+                } while (isPositionOccupied(x, y, z));
+                
+                this.x = x;
+                this.y = y;
+                this.z = z;
+                
+                this.mesh = new THREE.Mesh(foodGeometry, foodMaterial);
+                this.mesh.position.set(x, y, z);
+                
+                // Simplified glow
+                this.glowMesh = new THREE.Mesh(foodGeometry, glowMaterial);
+                this.glowMesh.position.set(x, y, z);
+                this.glowMesh.scale.set(1.2, 1.2, 1.2);
+                
+                scene.add(this.mesh);
+                scene.add(this.glowMesh);
+            }
+            
+            remove() {
+                scene.remove(this.mesh);
+                scene.remove(this.glowMesh);
+                this.mesh = null;
+                this.glowMesh = null;
+            }
+        }
+        
+        // Check if position is occupied by snake
+        function isPositionOccupied(x, y, z) {
+            return snake.some(segment => 
+                segment.x === x && segment.y === y && segment.z === z
+            );
+        }
+        
+        // Optimized camera update
+        function updateCamera() {
+            if (snake.length === 0) return;
+            
+            const head = snake[0];
+            
+            const sinY = Math.sin(cameraAngleY);
+            const cosY = Math.cos(cameraAngleY);
+            const sinX = Math.sin(cameraAngleX);
+            const cosX = Math.cos(cameraAngleX);
+            
+            const cameraX = head.x + cameraDistance * sinY * cosX;
+            const cameraY = head.y + cameraHeight + cameraDistance * sinX;
+            const cameraZ = head.z + cameraDistance * cosY * cosX;
+            
+            camera.position.set(cameraX, cameraY, cameraZ);
+            camera.lookAt(head.x, head.y + 1, head.z);
+        }
+        
+        // Initialize game
+        function initGame() {
+            snake.forEach(segment => segment.remove());
+            snake = [];
+            
+            if (food) {
+                food.remove();
+                food = null;
+            }
+            
+            score = 0;
+            document.getElementById('score').textContent = score;
+            gameOver = false;
+            document.getElementById('gameOver').style.display = 'none';
+            gameSpeed = INITIAL_SPEED;
+            
+            const startX = 0, startY = 0, startZ = 0;
+            
+            snake.push(new SnakeSegment(startX, startY, startZ));
+            snake.push(new SnakeSegment(startX - 1, startY, startZ));
+            snake.push(new SnakeSegment(startX - 2, startY, startZ));
+            
+            direction = { x: 1, y: 0, z: 0 };
+            nextDirection = { x: 1, y: 0, z: 0 };
+            lastDirection = { x: 1, y: 0, z: 0 };
+            
+            cameraAngleY = Math.PI / 4;
+            targetCameraAngleY = Math.PI / 4;
+            isCameraAutoRotating = true;
+            
+            spawnFood();
+            
+            if (!gameLoop) {
+                gameLoop = setInterval(updateGame, gameSpeed);
+            }
+            
+            updateCamera();
+        }
+        
+        function spawnFood() {
+            if (food) food.remove();
+            food = new Food();
+        }
+        
+        // Optimized game update
+        function updateGame() {
+            if (gameOver) return;
+            
+            direction = { ...nextDirection };
+            
+            const head = snake[0];
+            const newX = head.x + direction.x;
+            const newY = head.y + direction.y;
+            const newZ = head.z + direction.z;
+            
+            const GRID_BOUNDARY = 30; // Smaller boundary
+            if (Math.abs(newX) > GRID_BOUNDARY || Math.abs(newZ) > GRID_BOUNDARY) {
+                endGame();
+                return;
+            }
+            
+            if (isPositionOccupied(newX, newY, newZ)) {
+                endGame();
+                return;
+            }
+            
+            const newHead = new SnakeSegment(newX, newY, newZ);
+            snake.unshift(newHead);
+            
+            if (Math.abs(newX - food.x) < 0.5 && Math.abs(newZ - food.z) < 0.5) {
+                score += 10;
+                document.getElementById('score').textContent = score;
+                
+                if (score % 50 === 0 && gameSpeed > 50) {
+                    gameSpeed -= SPEED_INCREMENT;
+                    clearInterval(gameLoop);
+                    gameLoop = setInterval(updateGame, gameSpeed);
+                }
+                
+                spawnFood();
+            } else {
+                const tail = snake.pop();
+                tail.remove();
+            }
+            
+            // Simplified camera rotation logic
+            if (direction.x !== lastDirection.x || direction.z !== lastDirection.z) {
+                if (direction.x > 0) targetCameraAngleY = 0;
+                else if (direction.x < 0) targetCameraAngleY = Math.PI;
+                else if (direction.z > 0) targetCameraAngleY = Math.PI / 2;
+                else if (direction.z < 0) targetCameraAngleY = -Math.PI / 2;
+                
+                isCameraAutoRotating = true;
+                lastDirection = { ...direction };
+            }
+            
+            if (isCameraAutoRotating) {
+                const diff = targetCameraAngleY - cameraAngleY;
+                const absDiff = Math.abs(diff);
+                
+                if (absDiff > Math.PI) {
+                    cameraAngleY += Math.sign(diff) * (2 * Math.PI - absDiff) * 0.15; // Faster rotation
+                } else {
+                    cameraAngleY += diff * 0.15;
+                }
+                
+                if (Math.abs(targetCameraAngleY - cameraAngleY) < 0.02) { // Less precise
+                    cameraAngleY = targetCameraAngleY;
+                    isCameraAutoRotating = false;
+                }
+            }
+            
+            updateCamera();
+        }
+        
+        function endGame() {
+            gameOver = true;
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('gameOver').style.display = 'block';
+            clearInterval(gameLoop);
+            gameLoop = null;
+        }
+        
+        // Event listeners
+        document.addEventListener('keydown', (event) => {
+            if (gameOver && event.key === ' ') {
+                initGame();
+                return;
+            }
+            
+            if (event.key === ' ') {
+                isSpeedBoost = true;
+            }
+            
+            switch (event.key) {
+                case 'ArrowUp':
+                    if (direction.z === 0) nextDirection = { x: 0, y: 0, z: -1 };
+                    break;
+                case 'ArrowDown':
+                    if (direction.z === 0) nextDirection = { x: 0, y: 0, z: 1 };
+                    break;
+                case 'ArrowLeft':
+                    if (direction.x === 0) nextDirection = { x: -1, y: 0, z: 0 };
+                    break;
+                case 'ArrowRight':
+                    if (direction.x === 0) nextDirection = { x: 1, y: 0, z: 0 };
+                    break;
+            }
+        });
+        
+        document.addEventListener('keyup', (event) => {
+            if (event.key === ' ') {
+                isSpeedBoost = false;
+            }
+        });
+        
+        document.addEventListener('mousedown', (event) => {
+            mouseDown = true;
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+            isCameraAutoRotating = false;
+        });
+        
+        document.addEventListener('mouseup', () => {
+            mouseDown = false;
+        });
+        
+        document.addEventListener('mousemove', (event) => {
+            if (!mouseDown) return;
+            
+            const deltaX = event.clientX - lastMouseX;
+            const deltaY = event.clientY - lastMouseY;
+            
+            cameraAngleY += deltaX * 0.01;
+            cameraAngleX = Math.max(-Math.PI/3, Math.min(Math.PI/3, cameraAngleX + deltaY * 0.01));
+            
+            lastMouseX = event.clientX;
+            lastMouseY = event.clientY;
+            
+            updateCamera();
+        });
+        
+        document.addEventListener('wheel', (event) => {
+            cameraDistance = Math.max(5, Math.min(25, cameraDistance - event.deltaY * 0.01));
+            updateCamera();
+        });
+        
+        document.getElementById('restart').addEventListener('click', initGame);
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Hide controls hint after interaction
+        let interactionStarted = false;
+        document.addEventListener('keydown', () => {
+            if (!interactionStarted) {
+                document.getElementById('controlsHint').style.opacity = '0.3';
+                interactionStarted = true;
+            }
+        });
+        
+        // Optimized animation loop
+        let lastTime = 0;
+        function animate(currentTime) {
+            requestAnimationFrame(animate);
+            
+            // Simple star rotation instead of twinkling
+            if (stars) {
+                stars.rotation.y += 0.0005;
+            }
+            
+            // Optimized food glow animation (less frequent updates)
+            if (food && currentTime - lastTime > 16) { // ~60fps max
+                const scale = 1 + 0.05 * Math.sin(currentTime * 0.003);
+                food.glowMesh.scale.set(scale, scale, scale);
+                lastTime = currentTime;
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Start the game
+        initGame();
+        animate();
+    </script>
+</body>
+</html>
