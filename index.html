@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Snake Game</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://wellcaffeinated.net/PhysicsJS/physicsjs-full.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -220,448 +221,554 @@
             <button id="restart">Play Again</button>
         </div>
     </div>
-
-    <script>
-        // Game constants and variables
+<script>
+        // === Game Configuration ===
         const CELL_SIZE = 1;
         const INITIAL_SPEED = 150;
         const SPEED_INCREMENT = 5;
-        const SPEED_BOOST_FACTOR = 2;
-        
         let snake = [];
         let direction = { x: 1, y: 0, z: 0 };
-        let nextDirection = { x: 1, y: 0, z: 0 };
+        let nextDirection = { ...direction };
         let food = null;
         let score = 0;
-        let gameOver = false;
         let gameSpeed = INITIAL_SPEED;
-        let gameLoop;
-        let cameraDistance = 10;
-        let cameraHeight = 5;
-        let isSpeedBoost = false;
-        let mouseDown = false;
-        let lastMouseX = 0;
-        let lastMouseY = 0;
+        let gameOver = false;
+        let gameLoop = null;
+        let foodTimer = null;
+
+        // === Camera State ===
         let cameraAngleX = 0;
         let cameraAngleY = Math.PI / 4;
-        
-        // Camera rotation variables
         let targetCameraAngleY = Math.PI / 4;
-        let isCameraAutoRotating = true;
+        let cameraDistance = 8;
+        let cameraHeight = 6;
+        let isCameraAutoRotating = false;
         let lastDirection = { x: 1, y: 0, z: 0 };
 
-        // Performance optimizations
-        let segmentGeometry, segmentMaterial, foodGeometry, foodMaterial, glowMaterial;
-        let stars;
-
-        // Initialize Three.js
+        // === Three.js Essentials ===
         const scene = new THREE.Scene();
-        
-        // Simplified background - use fog instead of gradient texture
-        scene.background = new THREE.Color(0x0a0a2e);
-        scene.fog = new THREE.Fog(0x2b4f81, 50, 200);
-        
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
-        
-        const renderer = new THREE.WebGLRenderer({ 
-            antialias: false, // Disable for performance
-            alpha: false,
-            powerPreference: "high-performance"
+        scene.background = new THREE.Color(0x000022);
+        scene.fog = new THREE.Fog(0x000044, 25, 60);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        const renderer = new THREE.WebGLRenderer({
+            antialias: false,
+            powerPreference: "high-performance",
+            precision: "lowp"
         });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = false; // Disable shadows for performance
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
+        renderer.shadowMap.enabled = false;
+        renderer.setAnimationLoop(animate);
         document.getElementById('gameContainer').appendChild(renderer.domElement);
-        
-        // Simplified lighting
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+
+        // === Enhanced Ambient Lighting ===
+        const ambientLight = new THREE.AmbientLight(0x404080, 0.6); // Slightly blue ambient
         scene.add(ambientLight);
-        
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
         directionalLight.position.set(10, 20, 15);
         scene.add(directionalLight);
+
+        // Add subtle rim lighting
+        const rimLight = new THREE.DirectionalLight(0x8080ff, 0.3);
+        rimLight.position.set(-5, 5, -10);
+        scene.add(rimLight);
+
+        // === Optimized Starfield ===
+        const starGeometry = new THREE.BufferGeometry();
+        const starCount = 400; // Reduced count for better performance
+        const positions = new Float32Array(starCount * 3);
         
-        // Create optimized stars
-        function createStars() {
-            const starGeometry = new THREE.BufferGeometry();
-            const starCount = 100; // Reduced from 200
-            const positions = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+            const i3 = i * 3;
+            const radius = 50 + Math.random() * 80;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI;
             
-            for (let i = 0; i < starCount * 3; i += 3) {
-                const theta = Math.random() * Math.PI * 2;
-                const phi = Math.random() * Math.PI * 0.5;
-                const radius = 200 + Math.random() * 200; // Reduced range
-                
-                positions[i] = radius * Math.sin(phi) * Math.cos(theta);
-                positions[i + 1] = 50 + radius * Math.cos(phi);
-                positions[i + 2] = radius * Math.sin(phi) * Math.sin(theta);
-            }
-            
-            starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            
-            const starMaterial = new THREE.PointsMaterial({
-                color: 0xffffff,
-                size: 2,
-                transparent: false // Disable transparency
-            });
-            
-            stars = new THREE.Points(starGeometry, starMaterial);
-            scene.add(stars);
+            positions[i3] = radius * Math.sin(phi) * Math.cos(theta);
+            positions[i3 + 1] = radius * Math.cos(phi);
+            positions[i3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
         }
         
-        createStars();
+        starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         
-        // Simplified grid
-        function createGrid() {
-            const gridSize = 60; // Reduced size
-            const gridHelper = new THREE.GridHelper(gridSize, 12, 0x444444, 0x222222); // Fewer divisions
-            gridHelper.position.y = -0.5;
-            scene.add(gridHelper);
-            
-            // Simpler horizon
-            const horizonGeometry = new THREE.PlaneGeometry(400, 400); // Smaller
-            const horizonMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0x2b4f81,
-                side: THREE.DoubleSide
-            });
-            const horizon = new THREE.Mesh(horizonGeometry, horizonMaterial);
-            horizon.rotation.x = Math.PI / 2;
-            horizon.position.y = -1;
-            scene.add(horizon);
+        const starMaterial = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 1.5,
+            sizeAttenuation: false,
+            transparent: false
+        });
+        
+        const starfield = new THREE.Points(starGeometry, starMaterial);
+        scene.add(starfield);
+
+        // === Global Terrain Height Function ===
+        function getGlobalTerrainHeight(worldX, worldZ) {
+            let height = 0;
+            height += Math.sin(worldX * 0.04) * Math.cos(worldZ * 0.04) * 2.5;
+            height += Math.sin(worldX * 0.08) * Math.sin(worldZ * 0.08) * 1.2;
+            height += Math.sin(worldX * 0.2) * Math.cos(worldZ * 0.2) * 0.4;
+            return height;
         }
-        
-        createGrid();
-        
-        // Pre-create shared geometries and materials
-        segmentGeometry = new THREE.CylinderGeometry(0.35, 0.35, 0.7, 8); // Reduced segments
-        segmentGeometry.rotateX(Math.PI / 2);
-        segmentMaterial = new THREE.MeshLambertMaterial({ color: 0x4caf50 }); // Lambert instead of Phong
-        
-        foodGeometry = new THREE.SphereGeometry(0.45, 8, 8); // Reduced segments
-        foodMaterial = new THREE.MeshLambertMaterial({ 
-            color: 0xff5252,
-            emissive: 0x441111 // Reduced emissive
-        });
-        
-        glowMaterial = new THREE.MeshBasicMaterial({
-            color: 0xff2222,
-            transparent: true,
-            opacity: 0.2 // Reduced opacity
-        });
-        
-        // Optimized Snake segment class
-        class SnakeSegment {
-            constructor(x, y, z) {
+
+        // === Optimized Terrain System ===
+        class TerrainChunk {
+            constructor(x, z) {
                 this.x = x;
-                this.y = y;
                 this.z = z;
+                this.size = 30;
+                this.resolution = 6; // Further reduced for performance
+                this.group = new THREE.Group();
+                this.group.matrixAutoUpdate = false;
+                this.createChunk();
+                scene.add(this.group);
+            }
+
+            createChunk() {
+                const segments = this.resolution;
+                const geometry = new THREE.BufferGeometry();
+                const vertices = [];
+                const indices = [];
+                const colors = [];
                 
-                this.mesh = new THREE.Mesh(segmentGeometry, segmentMaterial);
-                this.mesh.position.set(x, y, z);
-                scene.add(this.mesh);
+                // Generate vertices with world coordinates for seamless borders
+                for (let z = 0; z <= segments; z++) {
+                    for (let x = 0; x <= segments; x++) {
+                        const worldX = this.x * this.size + (x / segments) * this.size - this.size / 2;
+                        const worldZ = this.z * this.size + (z / segments) * this.size - this.size / 2;
+                        const height = getGlobalTerrainHeight(worldX, worldZ);
+                        
+                        vertices.push(worldX - this.x * this.size, height, worldZ - this.z * this.size);
+                        
+                        // Optimized terrain coloring
+                        const normalizedHeight = Math.max(0, Math.min(1, (height + 2) / 5));
+                        const color = new THREE.Color();
+                        
+                        if (normalizedHeight < 0.3) {
+                            color.setRGB(0.1, 0.15, 0.3); // Water
+                        } else if (normalizedHeight < 0.45) {
+                            color.setRGB(0.4, 0.35, 0.2); // Sand
+                        } else if (normalizedHeight < 0.7) {
+                            const green = 0.6 + Math.random() * 0.3;
+                            color.setRGB(0.15 * green, 0.4 * green, 0.1 * green); // Grass
+                        } else if (normalizedHeight < 0.85) {
+                            color.setRGB(0.2, 0.4, 0.15); // Forest
+                        } else {
+                            const rock = 0.5 + normalizedHeight * 0.3;
+                            color.setRGB(rock, rock * 0.9, rock * 0.8); // Rock
+                        }
+                        colors.push(color.r, color.g, color.b);
+                    }
+                }
+                
+                // Generate triangle indices
+                for (let z = 0; z < segments; z++) {
+                    for (let x = 0; x < segments; x++) {
+                        const a = x + z * (segments + 1);
+                        const b = x + (z + 1) * (segments + 1);
+                        const c = (x + 1) + z * (segments + 1);
+                        const d = (x + 1) + (z + 1) * (segments + 1);
+                        
+                        indices.push(a, b, c);
+                        indices.push(b, d, c);
+                    }
+                }
+                
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                geometry.setIndex(indices);
+                geometry.computeVertexNormals();
+
+                const terrainMaterial = new THREE.MeshLambertMaterial({
+                    vertexColors: true,
+                    flatShading: true
+                });
+                
+                const terrain = new THREE.Mesh(geometry, terrainMaterial);
+                terrain.position.set(this.x * this.size, 0, this.z * this.size);
+                terrain.matrixAutoUpdate = false;
+                terrain.updateMatrix();
+                this.group.add(terrain);
+                this.group.updateMatrix();
+            }
+
+            remove() {
+                scene.remove(this.group);
+                this.group.traverse(child => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+            }
+        }
+
+        // Terrain manager
+        const terrainChunks = new Map();
+        const chunkPool = [];
+        const CHUNK_LOAD_DISTANCE = 1;
+        const CHUNK_UNLOAD_DISTANCE = 2;
+
+        // === Optimized Tree System ===
+        const treeGeometry = new THREE.ConeGeometry(0.5, 1.8, 4);
+        const treeTrunkGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.4, 4);
+        const treeMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x0d4d0d, 
+            flatShading: true 
+        });
+        const trunkMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x4d2d1a, 
+            flatShading: true 
+        });
+
+        const MAX_TREES = 80; // Reduced for performance
+        const treeInstancedMesh = new THREE.InstancedMesh(treeGeometry, treeMaterial, MAX_TREES);
+        const trunkInstancedMesh = new THREE.InstancedMesh(treeTrunkGeometry, trunkMaterial, MAX_TREES);
+        scene.add(treeInstancedMesh);
+        scene.add(trunkInstancedMesh);
+
+        const trees = [];
+        const treeMatrix = new THREE.Matrix4();
+        const treePosition = new THREE.Vector3();
+
+        class Tree {
+            constructor(x, z, index) {
+                this.x = x;
+                this.z = z;
+                this.index = index;
+                this.y = getTerrainHeightAt(x, z);
+                this.updateMatrix();
             }
             
-            updatePosition(x, y, z) {
-                this.x = x;
-                this.y = y;
-                this.z = z;
-                this.mesh.position.set(x, y, z);
+            updateMatrix() {
+                // Tree top
+                treePosition.set(this.x, this.y + 1.1, this.z);
+                treeMatrix.setPosition(treePosition);
+                treeInstancedMesh.setMatrixAt(this.index, treeMatrix);
+                
+                // Tree trunk
+                treePosition.set(this.x, this.y + 0.2, this.z);
+                treeMatrix.setPosition(treePosition);
+                trunkInstancedMesh.setMatrixAt(this.index, treeMatrix);
             }
             
             remove() {
-                scene.remove(this.mesh);
-                this.mesh.geometry.dispose(); // Not needed since shared, but good practice
-                this.mesh = null;
+                treePosition.set(0, -1000, 0);
+                treeMatrix.setPosition(treePosition);
+                treeInstancedMesh.setMatrixAt(this.index, treeMatrix);
+                trunkInstancedMesh.setMatrixAt(this.index, treeMatrix);
             }
         }
-        
-        // Optimized Food class
+
+        function spawnTreesInChunk(chunkX, chunkZ) {
+            const chunkSize = 30;
+            const treeDensity = 0.25; // Reduced density for performance
+            
+            for (let i = 0; i < 6; i++) { // Fewer attempts per chunk
+                const localX = Math.random() * chunkSize - chunkSize/2;
+                const localZ = Math.random() * chunkSize - chunkSize/2;
+                const worldX = chunkX * chunkSize + localX;
+                const worldZ = chunkZ * chunkSize + localZ;
+                const height = getTerrainHeightAt(worldX, worldZ);
+                
+                const normalizedHeight = Math.max(0, Math.min(1, (height + 2) / 5));
+                if (normalizedHeight >= 0.45 && normalizedHeight <= 0.7 && Math.random() < treeDensity) {
+                    const tooClose = trees.some(tree => 
+                        Math.abs(tree.x - worldX) < 2.5 && Math.abs(tree.z - worldZ) < 2.5
+                    );
+                    
+                    if (!tooClose && trees.length < MAX_TREES) {
+                        const tree = new Tree(worldX, worldZ, trees.length);
+                        trees.push(tree);
+                    }
+                }
+            }
+            
+            treeInstancedMesh.instanceMatrix.needsUpdate = true;
+            trunkInstancedMesh.instanceMatrix.needsUpdate = true;
+            treeInstancedMesh.count = trees.length;
+            trunkInstancedMesh.count = trees.length;
+        }
+
+        function getChunkKey(x, z) {
+            return `${x},${z}`;
+        }
+
+        function getTerrainHeightAt(worldX, worldZ) {
+            return getGlobalTerrainHeight(worldX, worldZ);
+        }
+
+        function updateTerrain(playerX, playerZ) {
+            const chunkX = Math.floor(playerX / 30);
+            const chunkZ = Math.floor(playerZ / 30);
+            
+            // Load new chunks
+            for (let x = chunkX - CHUNK_LOAD_DISTANCE; x <= chunkX + CHUNK_LOAD_DISTANCE; x++) {
+                for (let z = chunkZ - CHUNK_LOAD_DISTANCE; z <= chunkZ + CHUNK_LOAD_DISTANCE; z++) {
+                    const key = getChunkKey(x, z);
+                    if (!terrainChunks.has(key)) {
+                        let chunk;
+                        if (chunkPool.length > 0) {
+                            chunk = chunkPool.pop();
+                            chunk.x = x;
+                            chunk.z = z;
+                            chunk.group.clear();
+                            chunk.createChunk();
+                            scene.add(chunk.group);
+                        } else {
+                            chunk = new TerrainChunk(x, z);
+                        }
+                        terrainChunks.set(key, chunk);
+                        spawnTreesInChunk(x, z);
+                    }
+                }
+            }
+
+            // Unload distant chunks
+            const chunksToRemove = [];
+            terrainChunks.forEach((chunk, key) => {
+                const distance = Math.max(
+                    Math.abs(chunk.x - chunkX),
+                    Math.abs(chunk.z - chunkZ)
+                );
+                if (distance > CHUNK_UNLOAD_DISTANCE) {
+                    chunksToRemove.push(key);
+                }
+            });
+            
+            chunksToRemove.forEach(key => {
+                const chunk = terrainChunks.get(key);
+                scene.remove(chunk.group);
+                chunkPool.push(chunk);
+                terrainChunks.delete(key);
+            });
+        }
+
+        // === Optimized Snake System ===
+        const segmentGeometry = new THREE.CylinderGeometry(0.28, 0.28, 0.75, 6);
+        segmentGeometry.rotateX(Math.PI / 2);
+        const MAX_SNAKE_LENGTH = 500; // Reduced for performance
+        const segmentMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0x00ff88, 
+            emissive: 0x001111 
+        });
+        const snakeInstancedMesh = new THREE.InstancedMesh(segmentGeometry, segmentMaterial, MAX_SNAKE_LENGTH);
+        scene.add(snakeInstancedMesh);
+
+        const matrix = new THREE.Matrix4();
+        const position = new THREE.Vector3();
+        const GRAVITY_Y_OFFSET = 0.4;
+
+        class SnakeSegment {
+            constructor(x, y, z, index) {
+                this.x = x;
+                this.z = z;
+                this.y = getTerrainHeightAt(x, z) + GRAVITY_Y_OFFSET;
+                this.index = index;
+                this.updateMatrix();
+            }
+            
+            updateMatrix() {
+                this.y = getTerrainHeightAt(this.x, this.z) + GRAVITY_Y_OFFSET;
+                position.set(this.x, this.y, this.z);
+                matrix.setPosition(position);
+                snakeInstancedMesh.setMatrixAt(this.index, matrix);
+            }
+            
+            remove() {
+                position.set(0, -1000, 0);
+                matrix.setPosition(position);
+                snakeInstancedMesh.setMatrixAt(this.index, matrix);
+            }
+        }
+
+        // === Optimized Food System ===
+        const foodGeometry = new THREE.SphereGeometry(0.35, 6, 6);
+        const foodMaterial = new THREE.MeshLambertMaterial({ 
+            color: 0xff4444, 
+            emissive: 0x110000 
+        });
+        const foodMesh = new THREE.Mesh(foodGeometry, foodMaterial);
+        scene.add(foodMesh);
+
         class Food {
             constructor() {
-                let x, y, z;
+                let x, z;
+                const head = snake[0];
                 do {
-                    x = Math.floor(Math.random() * 26 - 13); // Smaller range
-                    y = 0;
-                    z = Math.floor(Math.random() * 26 - 13);
-                } while (isPositionOccupied(x, y, z));
+                    const angle = Math.random() * 2 * Math.PI;
+                    const dist = 5 + Math.random() * 8;
+                    x = Math.round(head.x + Math.cos(angle) * dist);
+                    z = Math.round(head.z + Math.sin(angle) * dist);
+                } while (snake.some(s => s.x === x && s.z === z));
                 
                 this.x = x;
-                this.y = y;
                 this.z = z;
-                
-                this.mesh = new THREE.Mesh(foodGeometry, foodMaterial);
-                this.mesh.position.set(x, y, z);
-                
-                // Simplified glow
-                this.glowMesh = new THREE.Mesh(foodGeometry, glowMaterial);
-                this.glowMesh.position.set(x, y, z);
-                this.glowMesh.scale.set(1.2, 1.2, 1.2);
-                
-                scene.add(this.mesh);
-                scene.add(this.glowMesh);
+                this.y = getTerrainHeightAt(x, z) + GRAVITY_Y_OFFSET;
+
+                foodMesh.position.set(x, this.y, z);
+                foodMesh.visible = true;
+                this._setTimer();
             }
             
-            remove() {
-                scene.remove(this.mesh);
-                scene.remove(this.glowMesh);
-                this.mesh = null;
-                this.glowMesh = null;
+            _setTimer() {
+                if (foodTimer) clearTimeout(foodTimer);
+                foodTimer = setTimeout(() => {
+                    foodMesh.visible = false;
+                    setTimeout(() => spawnFood(), 300);
+                }, 8000); // Shorter timer for more dynamic gameplay
             }
         }
-        
-        // Check if position is occupied by snake
-        function isPositionOccupied(x, y, z) {
-            return snake.some(segment => 
-                segment.x === x && segment.y === y && segment.z === z
-            );
-        }
-        
-        // Optimized camera update
-        function updateCamera() {
-            if (snake.length === 0) return;
-            
-            const head = snake[0];
-            
-            const sinY = Math.sin(cameraAngleY);
-            const cosY = Math.cos(cameraAngleY);
-            const sinX = Math.sin(cameraAngleX);
-            const cosX = Math.cos(cameraAngleX);
-            
-            const cameraX = head.x + cameraDistance * sinY * cosX;
-            const cameraY = head.y + cameraHeight + cameraDistance * sinX;
-            const cameraZ = head.z + cameraDistance * cosY * cosX;
-            
-            camera.position.set(cameraX, cameraY, cameraZ);
-            camera.lookAt(head.x, head.y + 1, head.z);
-        }
-        
-        // Initialize game
-        function initGame() {
-            snake.forEach(segment => segment.remove());
-            snake = [];
-            
-            if (food) {
-                food.remove();
-                food = null;
-            }
-            
-            score = 0;
-            document.getElementById('score').textContent = score;
-            gameOver = false;
-            document.getElementById('gameOver').style.display = 'none';
-            gameSpeed = INITIAL_SPEED;
-            
-            const startX = 0, startY = 0, startZ = 0;
-            
-            snake.push(new SnakeSegment(startX, startY, startZ));
-            snake.push(new SnakeSegment(startX - 1, startY, startZ));
-            snake.push(new SnakeSegment(startX - 2, startY, startZ));
-            
-            direction = { x: 1, y: 0, z: 0 };
-            nextDirection = { x: 1, y: 0, z: 0 };
-            lastDirection = { x: 1, y: 0, z: 0 };
-            
-            cameraAngleY = Math.PI / 4;
-            targetCameraAngleY = Math.PI / 4;
-            isCameraAutoRotating = true;
-            
-            spawnFood();
-            
-            if (!gameLoop) {
-                gameLoop = setInterval(updateGame, gameSpeed);
-            }
-            
-            updateCamera();
-        }
-        
+
         function spawnFood() {
-            if (food) food.remove();
+            if (foodTimer) clearTimeout(foodTimer);
             food = new Food();
         }
-        
-        // Optimized game update
+
+        function endGame() {
+            clearInterval(gameLoop);
+            gameLoop = null;
+            gameOver = true;
+            if (foodTimer) clearTimeout(foodTimer);
+            setTimeout(() => alert(`Game Over! Score: ${score}`), 100);
+        }
+
+        // === Optimized Camera System ===
+        function updateCamera() {
+            if (!snake[0]) return;
+            const head = snake[0];
+            const sinY = Math.sin(cameraAngleY), cosY = Math.cos(cameraAngleY);
+            const sinX = Math.sin(cameraAngleX), cosX = Math.cos(cameraAngleX);
+            camera.position.x = head.x + cameraDistance * sinY * cosX;
+            camera.position.y = head.y + cameraHeight + cameraDistance * sinX;
+            camera.position.z = head.z + cameraDistance * cosY * cosX;
+            camera.lookAt(head.x, head.y, head.z);
+        }
+
+        // === Core Game Logic ===
         function updateGame() {
             if (gameOver) return;
-            
             direction = { ...nextDirection };
-            
             const head = snake[0];
             const newX = head.x + direction.x;
-            const newY = head.y + direction.y;
             const newZ = head.z + direction.z;
-            
-            const GRID_BOUNDARY = 30; // Smaller boundary
-            if (Math.abs(newX) > GRID_BOUNDARY || Math.abs(newZ) > GRID_BOUNDARY) {
-                endGame();
-                return;
+
+            // Collision detection
+            for (let i = 0; i < snake.length; i++) {
+                if (snake[i].x === newX && snake[i].z === newZ)
+                    return endGame();
             }
-            
-            if (isPositionOccupied(newX, newY, newZ)) {
-                endGame();
-                return;
-            }
-            
-            const newHead = new SnakeSegment(newX, newY, newZ);
+
+            // Add new head
+            const newHead = new SnakeSegment(newX, 0, newZ, 0);
             snake.unshift(newHead);
-            
+
+            // Update all segments
+            for (let i = 0; i < snake.length; i++) {
+                snake[i].index = i;
+                snake[i].updateMatrix();
+            }
+
+            updateTerrain(newX, newZ);
+
+            // Food collision
             if (Math.abs(newX - food.x) < 0.5 && Math.abs(newZ - food.z) < 0.5) {
                 score += 10;
                 document.getElementById('score').textContent = score;
-                
-                if (score % 50 === 0 && gameSpeed > 50) {
+                if (foodTimer) clearTimeout(foodTimer);
+                foodMesh.visible = false;
+                setTimeout(() => spawnFood(), 200);
+                if (score % 50 === 0 && gameSpeed > 60) {
                     gameSpeed -= SPEED_INCREMENT;
                     clearInterval(gameLoop);
                     gameLoop = setInterval(updateGame, gameSpeed);
                 }
-                
-                spawnFood();
             } else {
                 const tail = snake.pop();
                 tail.remove();
             }
-            
-            // Simplified camera rotation logic
+
+            snakeInstancedMesh.instanceMatrix.needsUpdate = true;
+            snakeInstancedMesh.count = snake.length;
+
+            // Smooth camera rotation
             if (direction.x !== lastDirection.x || direction.z !== lastDirection.z) {
                 if (direction.x > 0) targetCameraAngleY = 0;
                 else if (direction.x < 0) targetCameraAngleY = Math.PI;
                 else if (direction.z > 0) targetCameraAngleY = Math.PI / 2;
                 else if (direction.z < 0) targetCameraAngleY = -Math.PI / 2;
-                
                 isCameraAutoRotating = true;
                 lastDirection = { ...direction };
             }
-            
             if (isCameraAutoRotating) {
-                const diff = targetCameraAngleY - cameraAngleY;
-                const absDiff = Math.abs(diff);
-                
-                if (absDiff > Math.PI) {
-                    cameraAngleY += Math.sign(diff) * (2 * Math.PI - absDiff) * 0.15; // Faster rotation
-                } else {
-                    cameraAngleY += diff * 0.15;
-                }
-                
-                if (Math.abs(targetCameraAngleY - cameraAngleY) < 0.02) { // Less precise
+                let delta = targetCameraAngleY - cameraAngleY;
+                if (delta > Math.PI) delta -= 2 * Math.PI;
+                if (delta < -Math.PI) delta += 2 * Math.PI;
+                cameraAngleY += delta * 0.2;
+                if (Math.abs(delta) < 0.05) {
                     cameraAngleY = targetCameraAngleY;
                     isCameraAutoRotating = false;
                 }
             }
-            
             updateCamera();
         }
-        
-        function endGame() {
-            gameOver = true;
-            document.getElementById('finalScore').textContent = score;
-            document.getElementById('gameOver').style.display = 'block';
-            clearInterval(gameLoop);
-            gameLoop = null;
-        }
-        
-        // Event listeners
-        document.addEventListener('keydown', (event) => {
-            if (gameOver && event.key === ' ') {
-                initGame();
-                return;
+
+        function initGame() {
+            // Reset game state
+            snake = [];
+            snakeInstancedMesh.count = 0;
+            score = 0;
+            document.getElementById('score').textContent = score;
+            gameOver = false;
+            gameSpeed = INITIAL_SPEED;
+
+            // Initialize snake
+            for (let i = 0; i < 3; i++) {
+                snake.push(new SnakeSegment(-i, 0, 0, i));
             }
-            
-            if (event.key === ' ') {
-                isSpeedBoost = true;
-            }
-            
-            switch (event.key) {
-                case 'ArrowUp':
-                    if (direction.z === 0) nextDirection = { x: 0, y: 0, z: -1 };
-                    break;
-                case 'ArrowDown':
-                    if (direction.z === 0) nextDirection = { x: 0, y: 0, z: 1 };
-                    break;
-                case 'ArrowLeft':
-                    if (direction.x === 0) nextDirection = { x: -1, y: 0, z: 0 };
-                    break;
-                case 'ArrowRight':
-                    if (direction.x === 0) nextDirection = { x: 1, y: 0, z: 0 };
-                    break;
-            }
-        });
-        
-        document.addEventListener('keyup', (event) => {
-            if (event.key === ' ') {
-                isSpeedBoost = false;
-            }
-        });
-        
-        document.addEventListener('mousedown', (event) => {
-            mouseDown = true;
-            lastMouseX = event.clientX;
-            lastMouseY = event.clientY;
+            snakeInstancedMesh.instanceMatrix.needsUpdate = true;
+            snakeInstancedMesh.count = snake.length;
+
+            direction = { x: 1, y: 0, z: 0 };
+            nextDirection = { ...direction };
+            lastDirection = { ...direction };
+            cameraAngleY = Math.PI / 4;
+            targetCameraAngleY = Math.PI / 4;
             isCameraAutoRotating = false;
-        });
-        
-        document.addEventListener('mouseup', () => {
-            mouseDown = false;
-        });
-        
-        document.addEventListener('mousemove', (event) => {
-            if (!mouseDown) return;
-            
-            const deltaX = event.clientX - lastMouseX;
-            const deltaY = event.clientY - lastMouseY;
-            
-            cameraAngleY += deltaX * 0.01;
-            cameraAngleX = Math.max(-Math.PI/3, Math.min(Math.PI/3, cameraAngleX + deltaY * 0.01));
-            
-            lastMouseX = event.clientX;
-            lastMouseY = event.clientY;
-            
+
+            spawnFood();
             updateCamera();
+
+            if (!gameLoop) gameLoop = setInterval(updateGame, gameSpeed);
+            if (foodTimer) clearTimeout(foodTimer);
+        }
+
+        // === Event Handlers ===
+        document.addEventListener('keydown', e => {
+            switch (e.key) {
+                case 'ArrowUp':    if (direction.z === 0) nextDirection = { x: 0, y: 0, z: -1 }; break;
+                case 'ArrowDown':  if (direction.z === 0) nextDirection = { x: 0, y: 0, z: 1 }; break;
+                case 'ArrowLeft':  if (direction.x === 0) nextDirection = { x: -1, y: 0, z: 0 }; break;
+                case 'ArrowRight': if (direction.x === 0) nextDirection = { x: 1, y: 0, z: 0 }; break;
+                case ' ': if (gameOver) initGame(); break;
+            }
         });
-        
-        document.addEventListener('wheel', (event) => {
-            cameraDistance = Math.max(5, Math.min(25, cameraDistance - event.deltaY * 0.01));
-            updateCamera();
-        });
-        
-        document.getElementById('restart').addEventListener('click', initGame);
         
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
-        
-        // Hide controls hint after interaction
-        let interactionStarted = false;
-        document.addEventListener('keydown', () => {
-            if (!interactionStarted) {
-                document.getElementById('controlsHint').style.opacity = '0.3';
-                interactionStarted = true;
-            }
-        });
-        
-        // Optimized animation loop
-        let lastTime = 0;
-        function animate(currentTime) {
-            requestAnimationFrame(animate);
-            
-            // Simple star rotation instead of twinkling
-            if (stars) {
-                stars.rotation.y += 0.0005;
-            }
-            
-            // Optimized food glow animation (less frequent updates)
-            if (food && currentTime - lastTime > 16) { // ~60fps max
-                const scale = 1 + 0.05 * Math.sin(currentTime * 0.003);
-                food.glowMesh.scale.set(scale, scale, scale);
-                lastTime = currentTime;
-            }
+
+        // === Optimized Animation Loop ===
+        function animate() {
+            // Minimal starfield rotation for atmosphere
+            if (starfield) starfield.rotation.y += 0.0005;
             
             renderer.render(scene, camera);
         }
-        
-        // Start the game
+
+        // Initialize the game
         initGame();
-        animate();
     </script>
 </body>
 </html>
